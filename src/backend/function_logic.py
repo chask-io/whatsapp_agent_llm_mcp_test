@@ -158,8 +158,11 @@ class _WhatsAppAgentWrapper(AgentWrapper):
         """
         temperature = 1.0 if self.model.startswith("gpt-5") else 0.7
 
+        has_tool_response = any(message.get("role") == "tool" for message in messages)
+        should_force_tool_call = force_tool_call and not has_tool_response
+
         extra_kwargs: Dict[str, Any] = {}
-        if force_tool_call and self.function_schemas:
+        if should_force_tool_call and self.function_schemas:
             extra_kwargs["tool_choice"] = "required"
 
         response = self.llm_client.chat(
