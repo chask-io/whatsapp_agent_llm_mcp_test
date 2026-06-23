@@ -1,1 +1,10 @@
-{"function_name": "WhatsappAgentLlmFn", "test_type": "provided_params", "args": {}, "prompt": "Test."}
+{
+  "function_name": "WhatsappAgentLlmMcpTestFn",
+  "test_type": "provided_params",
+  "args": {},
+  "widget_params": {},
+  "prompt": "Necesito revisar la orden 1001 del demo MCP.",
+  "event_type": "need_agent_whatsapp",
+  "extra_params": {},
+  "files": []
+}
