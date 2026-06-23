@@ -5,9 +5,11 @@ WhatsApp agent using the generic AgentFunctionBackend with WhatsApp-specific
 configuration, custom event formatting, and operator reminder injection.
 """
 
+import json
 import logging
 import os
-from typing import Any, Dict, List
+import re
+from typing import Any, Dict, List, Optional
 
 from chask_foundation.backend.agent_wrapper import (
     AgentConfig,
@@ -46,6 +48,19 @@ PIPELINE_COLLECTION_REMINDER = (
     "para iniciar la ejecución."
 )
 
+_PAUSE_BLOCK_FIELDS = (
+    ("reason", "reason"),
+    ("awaiting_for", "awaiting_for"),
+    ("related_task", "related_task"),
+    ("node", "nodo_pausado"),
+)
+
+_PAUSE_PROMPT_RE = re.compile(
+    r"Pausando por:\s*(?P<reason>.*?),\s*"
+    r"Esperando:\s*(?P<awaiting_for>.*?),\s*"
+    r"Nodo:\s*(?P<related_task>.*)$"
+)
+
 
 def _should_inject_operator_reminder(events: List[Dict[str, Any]]) -> bool:
     """Return True when an operator reminder should be injected.
@@ -68,6 +83,81 @@ def _should_inject_operator_reminder(events: List[Dict[str, Any]]) -> bool:
             last_relevant = "user"
 
     return has_operator and last_relevant == "user"
+
+
+def _format_pause_block_value(value: Any) -> str:
+    """Render structured pause-block values without inventing fields."""
+    if isinstance(value, (dict, list, tuple)):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    return str(value)
+
+
+def _build_pause_block_system_message(
+    pause_block: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, str]]:
+    """Build the pause context message from non-empty pause_block values."""
+    if not isinstance(pause_block, dict):
+        return None
+
+    fields = []
+    for field_name, label in _PAUSE_BLOCK_FIELDS:
+        value = pause_block.get(field_name)
+        if value is None or value == "":
+            continue
+        fields.append(f"{label}={_format_pause_block_value(value)}")
+
+    if not fields:
+        return None
+
+    content = (
+        "[Bloque de pausa] Esta sesión estaba pausada. "
+        f"{'; '.join(fields)}. "
+        "Aplica el Protocolo de reanudación desde pausa: si el nuevo mensaje "
+        "NO es awaiting_for, NO lo reenvíes con EnviarMensajeAlRequerimiento; "
+        "primero enruta la nueva intención."
+    )
+    return {"role": "system", "content": content}
+
+
+def _pause_block_from_tool_args(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize PauseOrchestrationFn args into the pause_block shape."""
+    return {
+        "reason": args.get("reason") or args.get("reason_to_pause"),
+        "awaiting_for": args.get("awaiting_for"),
+        "related_task": args.get("related_task"),
+        "node": args.get("node") or args.get("related_task"),
+    }
+
+
+def _extract_pause_block_from_events(
+    events: List[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Best-effort fallback using already-fetched same-session event history."""
+    for evt in reversed(events):
+        extra = evt.get("extra_params")
+        if not isinstance(extra, dict):
+            continue
+
+        pause_block = extra.get("pause_block")
+        if isinstance(pause_block, dict):
+            return pause_block
+
+        for tool_call in extra.get("tool_calls") or []:
+            if tool_call.get("name") != "PauseOrchestrationFn":
+                continue
+            args = tool_call.get("args") or {}
+            if isinstance(args, dict):
+                return _pause_block_from_tool_args(args)
+
+        if evt.get("event_type") == "pause_orchestration":
+            prompt = evt.get("prompt", "")
+            match = _PAUSE_PROMPT_RE.search(prompt)
+            if match:
+                pause_args = match.groupdict()
+                pause_args["node"] = pause_args.get("related_task")
+                return pause_args
+
+    return None
 
 
 # =============================================================================
@@ -105,7 +195,7 @@ WHATSAPP_CONFIG = AgentConfig(
     enable_dynamic_tools=True,
     dynamic_tool_slug="chask-dev",
     dynamic_tool_branch="test",
-    dynamic_tool_top_k=10,
+    dynamic_tool_top_k=5,
     forward_topic="orchestrator",
     default_prompt=(
         "Eres un modelo de lenguaje desarrollado por Chask. "
@@ -158,11 +248,8 @@ class _WhatsAppAgentWrapper(AgentWrapper):
         """
         temperature = 1.0 if self.model.startswith("gpt-5") else 0.7
 
-        has_tool_response = any(message.get("role") == "tool" for message in messages)
-        should_force_tool_call = force_tool_call and not has_tool_response
-
         extra_kwargs: Dict[str, Any] = {}
-        if should_force_tool_call and self.function_schemas:
+        if force_tool_call and self.function_schemas:
             extra_kwargs["tool_choice"] = "required"
 
         response = self.llm_client.chat(
@@ -205,6 +292,14 @@ class _WhatsAppAgentWrapper(AgentWrapper):
     def _prepare_messages(self) -> List[Dict[str, Any]]:
         system_prompt = self._build_system_prompt()
         conversation_history = self._build_whatsapp_conversation_history()
+        current_extra = self.orchestration_event.extra_params or {}
+        pause_block = current_extra.get("pause_block")
+        pause_source = "current_event"
+        if not isinstance(pause_block, dict):
+            pause_block = _extract_pause_block_from_events(getattr(self, "_raw_events", []))
+            pause_source = "event_history"
+
+        pause_block_message = _build_pause_block_system_message(pause_block)
 
         # Operator reminder
         if hasattr(self, "_raw_events") and _should_inject_operator_reminder(self._raw_events):
@@ -231,6 +326,10 @@ class _WhatsAppAgentWrapper(AgentWrapper):
         if auth_rematch_directive:
             messages.append({"role": "system", "content": auth_rematch_directive})
             logger.info("Injected auth_rematch directive as trailing system message")
+
+        if pause_block_message:
+            messages.append(pause_block_message)
+            logger.info("Injected pause_block context from %s", pause_source)
 
         return messages
 
@@ -296,19 +395,6 @@ class FunctionBackend(AgentFunctionBackend):
             model=model,
         )
 
-    def process_request(self) -> str:
-        """Route normal agent turns, with a node-test cold-start health path."""
-        extra_params = self.orchestration_event.extra_params or {}
-        if (
-            extra_params.get("is_node_test")
-            and self.orchestration_event.event_type == "function_call"
-        ):
-            message = "Whatsapp MCP dogfood cold-start health check passed."
-            self._send_response(message)
-            return message
-
-        return super().process_request()
-
     def _handle_agent_request(self) -> str:
         """Use _WhatsAppAgentWrapper for WhatsApp-specific message preparation.
 
@@ -334,11 +420,6 @@ class FunctionBackend(AgentFunctionBackend):
             response_message = agent.get_response()
 
             if response_message == "requested_orchestrator_assistance":
-                self.response_event_sent = True
-                return response_message
-
-            if self.orchestration_event.event_type in {"function_call_response", "execute_plan"}:
-                self._send_whatsapp_response(response_message)
                 self.response_event_sent = True
                 return response_message
 
@@ -436,21 +517,10 @@ class FunctionBackend(AgentFunctionBackend):
         logger.info(f"WhatsApp response sent [evolved from {oe.event_id} -> {evolved_uuid}]")
 
     def _get_phone_numbers(self, oe: OrchestrationEvent, conversation_uuid: str) -> Dict[str, Any]:
-        """Get user and agent phone numbers from extra_params, session history, or API."""
+        """Get user and agent phone numbers from extra_params or API."""
         original_extra = oe.extra_params or {}
         user_phone = original_extra.get("user_phone_number")
         agent_phone = original_extra.get("agent_phone_number")
-
-        if user_phone and agent_phone:
-            return {
-                "user_phone_number": user_phone,
-                "agent_phone_number": agent_phone,
-                "original_source": "agent",
-            }
-
-        history_phones = self._get_phone_numbers_from_history(oe)
-        user_phone = user_phone or history_phones.get("user_phone_number")
-        agent_phone = agent_phone or history_phones.get("agent_phone_number")
 
         if user_phone and agent_phone:
             return {
@@ -481,31 +551,6 @@ class FunctionBackend(AgentFunctionBackend):
             "agent_phone_number": agent_phone,
             "original_source": "agent",
         }
-
-    def _get_phone_numbers_from_history(self, oe: OrchestrationEvent) -> Dict[str, Any]:
-        """Recover WhatsApp phone metadata from prior session events."""
-        try:
-            response = orchestrator_api_manager.call(
-                "get_orchestration_events",
-                orchestration_session_id=oe.orchestration_session_uuid,
-                access_token=oe.access_token,
-                organization_id=oe.organization.organization_id,
-            )
-        except Exception as e:
-            logger.warning(f"Failed to recover phone numbers from session history: {e}")
-            return {}
-
-        for event in reversed(response.get("orchestration_events", [])):
-            extra_params = event.get("extra_params") or {}
-            user_phone = extra_params.get("user_phone_number")
-            agent_phone = extra_params.get("agent_phone_number")
-            if user_phone and agent_phone:
-                return {
-                    "user_phone_number": user_phone,
-                    "agent_phone_number": agent_phone,
-                }
-
-        return {}
 
     def _evolve_response_event(
         self, oe: OrchestrationEvent, response_message: str, extra_params: Dict[str, Any]

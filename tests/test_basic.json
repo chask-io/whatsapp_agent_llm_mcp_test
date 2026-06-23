@@ -1,5 +1,5 @@
 {
-  "function_name": "WhatsappAgentLlmFn",
+  "function_name": "WhatsappAgentLlmMcpTestFn",
   "args": {
     "action": "<action_value>"
   },
@@ -9,7 +9,7 @@
   "extra_params": {},
   "files": [],
   "metadata": {
-    "description": "Basic test for WhatsappAgentLlmFn",
+    "description": "Basic test for WhatsappAgentLlmMcpTestFn",
     "expected_status": "success"
   }
 }

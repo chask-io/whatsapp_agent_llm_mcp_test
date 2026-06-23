@@ -1,12 +1,18 @@
 {
   "function_name": "WhatsappAgentLlmMcpTestFn",
   "test_type": "provided_params",
-  "args": {
-    "action": "health"
-  },
+  "args": {},
   "widget_params": {},
-  "prompt": "Run the dogfood cold-start health check.",
-  "event_type": "function_call",
-  "extra_params": {},
-  "files": []
+  "prompt": "Hola, necesito ayuda con mi cuenta",
+  "event_type": "received_whatsapp_message",
+  "extra_params": {
+    "explicit_lambda_override": "WhatsappAgentLlmMcpTestFn-a16d086ce91e3465",
+    "user_phone_number": "+56912345678",
+    "agent_phone_number": "+56987654321"
+  },
+  "files": [],
+  "metadata": {
+    "description": "Test WhatsappAgentLlmMcpTestFn with a WhatsApp user message",
+    "expected_status": "success"
+  }
 }

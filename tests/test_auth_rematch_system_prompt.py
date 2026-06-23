@@ -128,6 +128,60 @@ def test_without_auth_rematch_marker_directive_is_absent():
     assert build_auth_rematch_directive_text(event) is None
 
 
+def test_pause_block_system_message_includes_actual_values_and_omits_nulls():
+    message = function_logic._build_pause_block_system_message({
+        "reason": "faltan datos",
+        "awaiting_for": "direccion",
+        "related_task": None,
+        "node": "Solicitar detalles",
+    })
+
+    assert message["role"] == "system"
+    assert "[Bloque de pausa]" in message["content"]
+    assert "reason=faltan datos" in message["content"]
+    assert "awaiting_for=direccion" in message["content"]
+    assert "nodo_pausado=Solicitar detalles" in message["content"]
+    assert "related_task=" not in message["content"]
+    assert "None" not in message["content"]
+    assert "NO lo reenvíes con EnviarMensajeAlRequerimiento" in message["content"]
+
+
+def test_pause_block_system_message_skips_empty_blocks():
+    assert function_logic._build_pause_block_system_message({}) is None
+    assert function_logic._build_pause_block_system_message({
+        "reason": None,
+        "awaiting_for": "",
+    }) is None
+
+
+def test_pause_block_fallback_extracts_pause_tool_args_from_history():
+    pause_block = function_logic._extract_pause_block_from_events([
+        {"event_type": "received_whatsapp_message", "extra_params": {}},
+        {"event_type": "context", "extra_params": ["not", "a", "dict"]},
+        {"event_type": "context", "extra_params": "not-a-dict"},
+        {
+            "event_type": "function_call",
+            "extra_params": {
+                "tool_calls": [{
+                    "name": "PauseOrchestrationFn",
+                    "args": {
+                        "reason_to_pause": "esperar muestra",
+                        "awaiting_for": "confirmacion",
+                        "related_task": "node-1",
+                    },
+                }],
+            },
+        },
+    ])
+
+    assert pause_block == {
+        "reason": "esperar muestra",
+        "awaiting_for": "confirmacion",
+        "related_task": "node-1",
+        "node": "node-1",
+    }
+
+
 def test_auth_rematch_directive_is_last_message_and_not_base_prompt():
     event = SimpleNamespace(
         extra_params={
@@ -152,3 +206,34 @@ def test_auth_rematch_directive_is_last_message_and_not_base_prompt():
     assert messages[-1]["role"] == "system"
     assert "INICIO DIRECTIVA AUTH_REMATCH" in messages[-1]["content"]
     assert messages[-2]["content"] == function_logic.PIPELINE_COLLECTION_REMINDER
+
+
+def test_pause_block_context_is_final_message_after_other_directives():
+    event = SimpleNamespace(
+        extra_params={
+            "agent_directive": "auth_rematch",
+            "accessible_flow_names": ["Inicio de Jornada para conductores"],
+            "pause_block": {
+                "reason": "faltan datos",
+                "awaiting_for": "direccion",
+                "node": "Solicitar detalles",
+            },
+        },
+        event_type="need_agent_whatsapp",
+    )
+    wrapper = SimpleNamespace(
+        orchestration_event=event,
+        _build_system_prompt=lambda: "PROMPT BASE",
+        _build_whatsapp_conversation_history=lambda: [
+            {"role": "user", "content": "quiero iniciar jornada"},
+        ],
+        _is_collecting_pipeline_data=lambda: True,
+    )
+
+    messages = function_logic._WhatsAppAgentWrapper._prepare_messages(wrapper)
+
+    assert messages[-1]["role"] == "system"
+    assert "[Bloque de pausa]" in messages[-1]["content"]
+    assert "awaiting_for=direccion" in messages[-1]["content"]
+    assert "INICIO DIRECTIVA AUTH_REMATCH" in messages[-2]["content"]
+    assert messages[-3]["content"] == function_logic.PIPELINE_COLLECTION_REMINDER
