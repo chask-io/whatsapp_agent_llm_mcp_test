@@ -193,7 +193,7 @@ WHATSAPP_CONFIG = AgentConfig(
     ],
     socket_name="whatsapp_agent",
     enable_dynamic_tools=True,
-    dynamic_tool_slug="chask-dev",
+    dynamic_tool_slug="chask",
     dynamic_tool_branch="test",
     dynamic_tool_top_k=5,
     forward_topic="orchestrator",
