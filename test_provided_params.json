@@ -3,7 +3,7 @@
   "test_type": "provided_params",
   "args": {},
   "widget_params": {},
-  "prompt": "Hola, necesito ayuda con mi cuenta",
+  "prompt": "Hola, revisa por favor el estado de la orden 1001 y respondeme por WhatsApp con el resultado.",
   "event_type": "received_whatsapp_message",
   "extra_params": {
     "explicit_lambda_override": "WhatsappAgentLlmMcpTestFn-a16d086ce91e3465",
@@ -12,7 +12,7 @@
   },
   "files": [],
   "metadata": {
-    "description": "Test WhatsappAgentLlmMcpTestFn with a WhatsApp user message",
+    "description": "Test WhatsappAgentLlmMcpTestFn tenant MCP order lookup from a WhatsApp user message",
     "expected_status": "success"
   }
 }
