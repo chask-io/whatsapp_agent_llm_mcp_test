@@ -337,6 +337,11 @@ class FunctionBackend(AgentFunctionBackend):
                 self.response_event_sent = True
                 return response_message
 
+            if self.orchestration_event.event_type in {"function_call_response", "execute_plan"}:
+                self._send_whatsapp_response(response_message)
+                self.response_event_sent = True
+                return response_message
+
             # Safety net: tool_choice="required" should prevent this, but if it
             # happens, re-invoke the whatsapp agent so it tries again with an
             # explicit instruction to use a tool.
