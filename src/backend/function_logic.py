@@ -194,6 +194,7 @@ WHATSAPP_CONFIG = AgentConfig(
     socket_name="whatsapp_agent",
     enable_dynamic_tools=True,
     dynamic_tool_slug="chask-dev",
+    dynamic_tool_organization_id="faed8f52-3a25-41be-8a13-cc10b51e05a7",
     dynamic_tool_branch="test",
     dynamic_tool_top_k=5,
     forward_topic="orchestrator",
