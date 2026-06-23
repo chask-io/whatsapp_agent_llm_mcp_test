@@ -436,10 +436,21 @@ class FunctionBackend(AgentFunctionBackend):
         logger.info(f"WhatsApp response sent [evolved from {oe.event_id} -> {evolved_uuid}]")
 
     def _get_phone_numbers(self, oe: OrchestrationEvent, conversation_uuid: str) -> Dict[str, Any]:
-        """Get user and agent phone numbers from extra_params or API."""
+        """Get user and agent phone numbers from extra_params, session history, or API."""
         original_extra = oe.extra_params or {}
         user_phone = original_extra.get("user_phone_number")
         agent_phone = original_extra.get("agent_phone_number")
+
+        if user_phone and agent_phone:
+            return {
+                "user_phone_number": user_phone,
+                "agent_phone_number": agent_phone,
+                "original_source": "agent",
+            }
+
+        history_phones = self._get_phone_numbers_from_history(oe)
+        user_phone = user_phone or history_phones.get("user_phone_number")
+        agent_phone = agent_phone or history_phones.get("agent_phone_number")
 
         if user_phone and agent_phone:
             return {
@@ -470,6 +481,31 @@ class FunctionBackend(AgentFunctionBackend):
             "agent_phone_number": agent_phone,
             "original_source": "agent",
         }
+
+    def _get_phone_numbers_from_history(self, oe: OrchestrationEvent) -> Dict[str, Any]:
+        """Recover WhatsApp phone metadata from prior session events."""
+        try:
+            response = orchestrator_api_manager.call(
+                "get_orchestration_events",
+                orchestration_session_id=oe.orchestration_session_uuid,
+                access_token=oe.access_token,
+                organization_id=oe.organization.organization_id,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to recover phone numbers from session history: {e}")
+            return {}
+
+        for event in reversed(response.get("orchestration_events", [])):
+            extra_params = event.get("extra_params") or {}
+            user_phone = extra_params.get("user_phone_number")
+            agent_phone = extra_params.get("agent_phone_number")
+            if user_phone and agent_phone:
+                return {
+                    "user_phone_number": user_phone,
+                    "agent_phone_number": agent_phone,
+                }
+
+        return {}
 
     def _evolve_response_event(
         self, oe: OrchestrationEvent, response_message: str, extra_params: Dict[str, Any]
