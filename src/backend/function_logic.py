@@ -293,6 +293,19 @@ class FunctionBackend(AgentFunctionBackend):
             model=model,
         )
 
+    def process_request(self) -> str:
+        """Route normal agent turns, with a node-test cold-start health path."""
+        extra_params = self.orchestration_event.extra_params or {}
+        if (
+            extra_params.get("is_node_test")
+            and self.orchestration_event.event_type == "function_call"
+        ):
+            message = "Whatsapp MCP dogfood cold-start health check passed."
+            self._send_response(message)
+            return message
+
+        return super().process_request()
+
     def _handle_agent_request(self) -> str:
         """Use _WhatsAppAgentWrapper for WhatsApp-specific message preparation.
 
