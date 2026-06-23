@@ -3,7 +3,7 @@
   "test_type": "operator_params",
   "args": {},
   "widget_params": {},
-  "prompt": "Responde al usuario por WhatsApp con un saludo breve y pregunta en qué puedes ayudar",
+  "prompt": "El usuario pregunta por WhatsApp si puedes revisar el estado de la orden 1001. Usa la herramienta disponible para consultar la orden y responde por WhatsApp con el resultado.",
   "event_type": "received_whatsapp_message",
   "extra_params": {
     "is_operator_params_test": true,
@@ -13,7 +13,7 @@
   },
   "files": [],
   "metadata": {
-    "description": "Test operator-style prompt for WhatsappAgentLlmMcpTestFn with a WhatsApp user message",
+    "description": "Test operator-style tenant MCP order lookup for WhatsappAgentLlmMcpTestFn",
     "expected_status": "success"
   }
 }
