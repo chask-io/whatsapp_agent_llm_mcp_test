@@ -1,5 +1,5 @@
 function:
-  name: WhatsappAgentLlmMcpTestFn
+  name: WhatsappAgentLlmMcpFn
   runtime: python3.12
   handler: handler.lambda_handler
   description: >

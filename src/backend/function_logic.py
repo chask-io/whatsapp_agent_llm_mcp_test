@@ -11,6 +11,8 @@ import os
 import re
 from typing import Any, Dict, List, Optional
 
+import requests
+
 from chask_foundation.backend.agent_wrapper import (
     AgentConfig,
     AgentFunctionBackend,
@@ -47,6 +49,53 @@ PIPELINE_COLLECTION_REMINDER = (
     "Cuando tengas la información requerida, llama a SendPipelineDataFn "
     "para iniciar la ejecución."
 )
+
+
+def _runtime_tenant_mcp_context(
+    oe: OrchestrationEvent,
+    _gateway_function: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Resolve Tenant MCP discovery against the runtime organization."""
+    org_uuid = str(oe.organization.organization_id)
+    headers = {
+        "Organization-ID": org_uuid,
+        "Content-Type": "application/json",
+    }
+    if oe.access_token:
+        headers["Authorization"] = f"Bearer {oe.access_token}"
+
+    api_base_url = os.getenv("BASE_DOMAIN", "https://app.chask.io").rstrip("/")
+    if not api_base_url.endswith("/api/v2"):
+        api_base_url = f"{api_base_url}/api/v2"
+
+    response = requests.get(
+        f"{api_base_url}/organizations/lookup-slug",
+        params={"org_uuid": org_uuid},
+        headers=headers,
+        timeout=10,
+    )
+    if response.status_code == 404:
+        response = requests.get(
+            f"{api_base_url}/organizations/get-org",
+            params={"org_uuid": org_uuid},
+            headers=headers,
+            timeout=10,
+        )
+    response.raise_for_status()
+    data = response.json()
+    slug = data.get("slug")
+    organization = data.get("organization")
+    if not slug and isinstance(organization, dict):
+        slug = organization.get("slug")
+    if not slug:
+        raise RuntimeError(f"Could not resolve tenant MCP slug for org {org_uuid}")
+
+    return {
+        "slug": str(slug),
+        "branch": os.getenv("CHASK_TENANT_BRANCH", "prod"),
+        "tenant_organization_id": org_uuid,
+        "organization_name": oe.organization.organization_name,
+    }
 
 _PAUSE_BLOCK_FIELDS = (
     ("reason", "reason"),
@@ -193,8 +242,7 @@ WHATSAPP_CONFIG = AgentConfig(
     ],
     socket_name="whatsapp_agent",
     enable_dynamic_tools=True,
-    dynamic_tool_slug="chask",
-    dynamic_tool_branch="test",
+    dynamic_tool_context_resolver=_runtime_tenant_mcp_context,
     dynamic_tool_top_k=5,
     forward_topic="orchestrator",
     default_prompt=(
