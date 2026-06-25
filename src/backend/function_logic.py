@@ -50,6 +50,32 @@ PIPELINE_COLLECTION_REMINDER = (
     "para iniciar la ejecución."
 )
 
+TENANT_MCP_SYSTEM_GUARD = (
+    "\n\n[Instrucciones Tenant MCP]\n"
+    "- Si el usuario pregunta qué puedes hacer, qué herramientas MCP hay, "
+    "o capacidades disponibles, responde usando las descripciones de las "
+    "herramientas descubiertas. NO ejecutes tenant_mcp solo para contestar "
+    "una pregunta de capacidades; usa WhatsappAlUsuarioFn para enviar la "
+    "respuesta al usuario.\n"
+    "- Cuando recibas un Resultado Tenant MCP en el historial, considéralo "
+    "un resultado completo de la herramienta. Resume ese resultado en "
+    "español y responde al usuario con WhatsappAlUsuarioFn.\n"
+    "- No vuelvas a llamar tenant_mcp con la misma función, acción y "
+    "parámetros si ya tienes un Resultado Tenant MCP suficiente. Solo repite "
+    "tenant_mcp si necesitas datos distintos o paginación adicional para "
+    "responder con precisión.\n"
+    "- Nunca entres en un ciclo de llamadas idénticas: después de una "
+    "ejecución exitosa, avanza hacia una respuesta al usuario.\n"
+    "[Fin Instrucciones Tenant MCP]"
+)
+
+
+def _with_tenant_mcp_system_guard(prompt: str) -> str:
+    """Append the Tenant MCP loop guard once to the system prompt."""
+    if "[Instrucciones Tenant MCP]" in prompt:
+        return prompt
+    return f"{prompt}{TENANT_MCP_SYSTEM_GUARD}"
+
 
 def _control_plane_api_base_url() -> str:
     """Return the chask_api /api/v2 base URL with an explicit scheme."""
@@ -291,9 +317,11 @@ class _WhatsAppAgentWrapper(AgentWrapper):
             if socket_prompt:
                 logger.info("Applying template variables to socket-assigned context")
                 data = get_whatsapp_prompt_data(oe)
-                return apply_template_variables(socket_prompt, data)
+                return _with_tenant_mcp_system_guard(
+                    apply_template_variables(socket_prompt, data)
+                )
 
-        return build_whatsapp_system_prompt(oe)
+        return _with_tenant_mcp_system_guard(build_whatsapp_system_prompt(oe))
 
     def _call_llm(
         self, messages: List[Dict[str, Any]], force_tool_call: bool = True,

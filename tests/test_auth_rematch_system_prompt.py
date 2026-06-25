@@ -258,3 +258,35 @@ def test_pause_block_context_is_final_message_after_other_directives():
     assert "awaiting_for=direccion" in messages[-1]["content"]
     assert "INICIO DIRECTIVA AUTH_REMATCH" in messages[-2]["content"]
     assert messages[-3]["content"] == function_logic.PIPELINE_COLLECTION_REMINDER
+
+
+def test_tenant_mcp_system_guard_appends_once():
+    prompt = function_logic._with_tenant_mcp_system_guard("PROMPT BASE")
+
+    assert prompt.startswith("PROMPT BASE")
+    assert "[Instrucciones Tenant MCP]" in prompt
+    assert "NO ejecutes tenant_mcp" in prompt
+    assert "Resultado Tenant MCP" in prompt
+    assert "WhatsappAlUsuarioFn" in prompt
+    assert function_logic._with_tenant_mcp_system_guard(prompt) == prompt
+
+
+def test_tenant_mcp_system_guard_is_added_to_socket_prompt(monkeypatch):
+    wrapper = SimpleNamespace(
+        config=SimpleNamespace(socket_name="whatsapp_agent"),
+        orchestration_event=SimpleNamespace(
+            orchestration_session=SimpleNamespace(orchestration_session_id="session-1")
+        ),
+        _fetch_socket_context=lambda: "Hola {organizacion_name}",
+    )
+    monkeypatch.setattr(
+        function_logic,
+        "get_whatsapp_prompt_data",
+        lambda _event: {"organizacion_name": "B Quellon"},
+    )
+
+    prompt = function_logic._WhatsAppAgentWrapper._build_system_prompt(wrapper)
+
+    assert "Hola B Quellon" in prompt
+    assert "[Instrucciones Tenant MCP]" in prompt
+    assert "NO ejecutes tenant_mcp" in prompt

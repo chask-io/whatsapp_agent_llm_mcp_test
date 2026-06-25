@@ -82,6 +82,80 @@ _TOOL_EVENT_TYPES = {
 }
 
 
+def _compact_json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def _summarize_tenant_mcp_payload(raw_content: str) -> str:
+    try:
+        payload = json.loads(raw_content)
+    except (TypeError, ValueError):
+        return "La herramienta tenant_mcp devolvió un resultado en texto."
+
+    if not isinstance(payload, dict):
+        return "La herramienta tenant_mcp devolvió un resultado estructurado."
+
+    status = payload.get("status_code")
+    items = payload.get("items")
+    page = payload.get("page")
+    parts = []
+    if status is not None:
+        parts.append(f"status_code={status}")
+    if isinstance(items, list):
+        parts.append(f"items={len(items)}")
+    if isinstance(page, dict):
+        returned = page.get("returned")
+        limit = page.get("limit")
+        offset = page.get("offset")
+        page_bits = []
+        if returned is not None:
+            page_bits.append(f"returned={returned}")
+        if limit is not None:
+            page_bits.append(f"limit={limit}")
+        if offset is not None:
+            page_bits.append(f"offset={offset}")
+        if page_bits:
+            parts.append("page(" + ", ".join(page_bits) + ")")
+    if parts:
+        return "Resultado recibido correctamente (" + "; ".join(parts) + ")."
+    return "Resultado recibido correctamente."
+
+
+def _format_tenant_mcp_result(
+    response_content: str,
+    tool_call: Optional[Dict[str, Any]],
+) -> str:
+    args = tool_call.get("args", {}) if isinstance(tool_call, dict) else {}
+    if not isinstance(args, dict):
+        args = {}
+
+    function_name = args.get("function_name") or "función tenant"
+    action = args.get("action") or "acción"
+    params = args.get("params")
+    params_text = (
+        _compact_json(params) if isinstance(params, dict) and params else "sin parámetros"
+    )
+    summary = _summarize_tenant_mcp_payload(response_content)
+    logger.info(
+        "Wrapped tenant_mcp result for history: function=%s action=%s summary=%s",
+        function_name,
+        action,
+        summary,
+    )
+
+    return (
+        "Resultado Tenant MCP completado.\n"
+        f"Función: {function_name}.\n"
+        f"Acción: {action}.\n"
+        f"Parámetros usados: {params_text}.\n"
+        f"Resumen: {summary}\n"
+        "Usa este resultado para responder al usuario en español con "
+        "WhatsappAlUsuarioFn. No repitas la misma llamada tenant_mcp salvo "
+        "que necesites datos distintos.\n"
+        f"Datos devueltos:\n{response_content}"
+    )
+
+
 class WhatsAppEventFormatter:
     """Dict-based event formatter with registry-based event handlers.
 
@@ -343,10 +417,13 @@ class WhatsAppEventFormatter:
         # Emit ToolMessage
         if tool_call:
             effective_name = extra.get("tool_name") or tool_call.get("name", "unknown")
+            content = response_content
+            if effective_name == "tenant_mcp" or tool_call.get("name") == "tenant_mcp":
+                content = _format_tenant_mcp_result(response_content, tool_call)
             output.append({
                 "role": "tool",
                 "tool_call_id": matched_id,
-                "content": response_content,
+                "content": content,
             })
 
         output.extend(cls._flush_buffered_events(matched_id, state, channel_map))
