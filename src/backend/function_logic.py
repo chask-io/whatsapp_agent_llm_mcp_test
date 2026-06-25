@@ -51,6 +51,20 @@ PIPELINE_COLLECTION_REMINDER = (
 )
 
 
+def _control_plane_api_base_url() -> str:
+    """Return the chask_api /api/v2 base URL with an explicit scheme."""
+    base_url = (
+        os.getenv("CHASK_API_BASE_URL")
+        or os.getenv("BASE_DOMAIN")
+        or "https://app.chask.io"
+    ).strip().rstrip("/")
+    if "://" not in base_url:
+        base_url = f"https://{base_url}"
+    if not base_url.endswith("/api/v2"):
+        base_url = f"{base_url}/api/v2"
+    return base_url
+
+
 def _runtime_tenant_mcp_context(
     oe: OrchestrationEvent,
     _gateway_function: Dict[str, Any],
@@ -64,9 +78,7 @@ def _runtime_tenant_mcp_context(
     if oe.access_token:
         headers["Authorization"] = f"Bearer {oe.access_token}"
 
-    api_base_url = os.getenv("BASE_DOMAIN", "https://app.chask.io").rstrip("/")
-    if not api_base_url.endswith("/api/v2"):
-        api_base_url = f"{api_base_url}/api/v2"
+    api_base_url = _control_plane_api_base_url()
 
     response = requests.get(
         f"{api_base_url}/organizations/lookup-slug",

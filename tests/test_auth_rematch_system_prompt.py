@@ -79,6 +79,27 @@ function_logic = importlib.util.module_from_spec(function_logic_spec)
 function_logic_spec.loader.exec_module(function_logic)
 
 
+def test_control_plane_api_base_url_adds_https_for_bare_base_domain(monkeypatch):
+    monkeypatch.delenv("CHASK_API_BASE_URL", raising=False)
+    monkeypatch.setenv("BASE_DOMAIN", "app.chask.io")
+
+    assert function_logic._control_plane_api_base_url() == "https://app.chask.io/api/v2"
+
+
+def test_control_plane_api_base_url_preserves_existing_api_base(monkeypatch):
+    monkeypatch.delenv("CHASK_API_BASE_URL", raising=False)
+    monkeypatch.setenv("BASE_DOMAIN", "https://app.chask.it/api/v2")
+
+    assert function_logic._control_plane_api_base_url() == "https://app.chask.it/api/v2"
+
+
+def test_control_plane_api_base_url_prefers_explicit_chask_api_base(monkeypatch):
+    monkeypatch.setenv("CHASK_API_BASE_URL", "https://app.chask.io/api/v2/")
+    monkeypatch.setenv("BASE_DOMAIN", "app.chask.it")
+
+    assert function_logic._control_plane_api_base_url() == "https://app.chask.io/api/v2"
+
+
 def test_auth_rematch_marker_builds_directive_with_accessible_flows():
     event = SimpleNamespace(
         extra_params={
