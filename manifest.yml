@@ -1,10 +1,10 @@
 function:
-  name: WhatsappAgentLlmMcpTestFn
+  name: WhatsappAgentLlmMcpFn
   runtime: python3.12
   handler: handler.lambda_handler
   description: >
-    DEV dogfood WhatsApp agent for validating tenant MCP dynamic tool discovery
-    and execution through McpTenantFn.
+    Production WhatsApp agent with Tenant MCP dynamic tool discovery and
+    execution through McpTenantFn.
   timeout: 300
   memory_size: 1024
   type: agent

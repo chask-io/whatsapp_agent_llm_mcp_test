@@ -1,12 +1,18 @@
 {
-  "function_name": "WhatsappAgentLlmMcpTestFn",
+  "function_name": "WhatsappAgentLlmMcpFn",
   "test_type": "provided_params",
-  "args": {
-    "action": "health"
-  },
+  "args": {},
   "widget_params": {},
-  "prompt": "Run the dogfood cold-start health check.",
-  "event_type": "function_call",
-  "extra_params": {},
-  "files": []
+  "prompt": "Hola, revisa por favor el estado de la orden 1001 y respondeme por WhatsApp con el resultado.",
+  "event_type": "received_whatsapp_message",
+  "extra_params": {
+    "explicit_lambda_override": "WhatsappAgentLlmMcpFn-a16d086ce91e3465",
+    "user_phone_number": "+56912345678",
+    "agent_phone_number": "+56987654321"
+  },
+  "files": [],
+  "metadata": {
+    "description": "Test WhatsappAgentLlmMcpFn tenant MCP order lookup from a WhatsApp user message",
+    "expected_status": "success"
+  }
 }

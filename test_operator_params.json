@@ -1,14 +1,1 @@
-{
-  "function_name": "WhatsappAgentLlmMcpTestFn",
-  "test_type": "operator_params",
-  "args": {
-    "action": "health"
-  },
-  "widget_params": {},
-  "prompt": "Run the dogfood cold-start health check.",
-  "event_type": "function_call",
-  "extra_params": {
-    "is_operator_params_test": true
-  },
-  "files": []
-}
+{"function_name": "WhatsappAgentLlmMcpFn", "test_type": "operator_params", "args": {}, "prompt": "Test."}
