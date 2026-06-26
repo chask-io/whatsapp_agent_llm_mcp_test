@@ -265,8 +265,9 @@ def test_tenant_mcp_system_guard_appends_once():
 
     assert prompt.startswith("PROMPT BASE")
     assert "[Instrucciones Tenant MCP]" in prompt
-    assert "NO ejecutes tenant_mcp" in prompt
+    assert "normalmente basta responder con WhatsappAlUsuarioFn" in prompt
     assert "Resultado Tenant MCP" in prompt
+    assert "Resultado Tenant MCP fallido" in prompt
     assert "WhatsappAlUsuarioFn" in prompt
     assert function_logic._with_tenant_mcp_system_guard(prompt) == prompt
 
@@ -289,4 +290,4 @@ def test_tenant_mcp_system_guard_is_added_to_socket_prompt(monkeypatch):
 
     assert "Hola B Quellon" in prompt
     assert "[Instrucciones Tenant MCP]" in prompt
-    assert "NO ejecutes tenant_mcp" in prompt
+    assert "normalmente basta responder con WhatsappAlUsuarioFn" in prompt

@@ -86,16 +86,181 @@ def _compact_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
-def _summarize_tenant_mcp_payload(raw_content: str) -> str:
+def _parse_json_payload(raw_content: str) -> Any:
     try:
-        payload = json.loads(raw_content)
+        return json.loads(raw_content)
     except (TypeError, ValueError):
+        return None
+
+
+def _coerce_status_code(raw_status: Any) -> Optional[int]:
+    try:
+        return int(raw_status)
+    except (TypeError, ValueError):
+        return None
+
+
+def _payload_status_code(payload: Any) -> Optional[int]:
+    if not isinstance(payload, dict):
+        return None
+
+    for key in ("status_code", "statusCode", "http_status"):
+        status_code = _coerce_status_code(payload.get(key))
+        if status_code is not None:
+            return status_code
+
+    # Only inspect explicit error envelopes, never arbitrary tenant body data.
+    for envelope_key in ("runtime_error", "lambda_error", "error"):
+        envelope = payload.get(envelope_key)
+        if isinstance(envelope, dict):
+            for key in ("status_code", "statusCode", "http_status"):
+                status_code = _coerce_status_code(envelope.get(key))
+                if status_code is not None:
+                    return status_code
+    return None
+
+
+def _payload_error_text(payload: Any, raw_content: str) -> str:
+    if isinstance(payload, dict):
+        for key in ("runtime_error", "lambda_error", "error", "detail", "message"):
+            error = payload.get(key)
+            if isinstance(error, (dict, list)):
+                return _compact_json(error)
+            if error is not None:
+                return str(error)
+    return raw_content
+
+
+def _is_tenant_mcp_error(payload: Any, raw_content: str) -> bool:
+    status_code = _payload_status_code(payload)
+    if status_code is not None and status_code >= 400:
+        return True
+    if isinstance(payload, dict) and any(
+        payload.get(key) for key in ("runtime_error", "lambda_error")
+    ):
+        return True
+    if isinstance(payload, dict):
+        error_value = payload.get("error")
+        if isinstance(error_value, (dict, list)):
+            return bool(error_value)
+        if isinstance(error_value, str):
+            return bool(error_value.strip())
+        return bool(error_value)
+
+    # For parsed JSON, rely on structured top-level/envelope signals only.
+    if payload is not None:
+        return False
+
+    lowered = raw_content.lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "lambda error",
+            "runtime_error",
+            "validation error",
+            "unprocessable entity",
+        )
+    )
+
+
+def _request_schema_from_tool_call(
+    tool_args: Dict[str, Any],
+    action: str,
+) -> Optional[Dict[str, Any]]:
+    function_data = tool_args.get("function_data")
+    if not isinstance(function_data, dict):
+        return None
+
+    candidates = []
+    mcp_actions = function_data.get("mcp_actions")
+    if isinstance(mcp_actions, dict) and isinstance(mcp_actions.get(action), dict):
+        candidates.append(mcp_actions[action])
+
+    action_parameters = function_data.get("action_parameters")
+    if isinstance(action_parameters, dict) and isinstance(action_parameters.get(action), dict):
+        candidates.append(action_parameters[action])
+
+    candidates.append(function_data)
+    for candidate in candidates:
+        schema = candidate.get("request_schema") if isinstance(candidate, dict) else None
+        if isinstance(schema, dict):
+            return schema
+    return None
+
+
+def _schema_required_fields(schema: Optional[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    if not isinstance(schema, dict):
+        return {}
+
+    required = schema.get("required")
+    properties = schema.get("properties")
+    if not isinstance(required, list) or not isinstance(properties, dict):
+        return {}
+
+    return {
+        str(name): properties.get(name, {}) if isinstance(properties.get(name), dict) else {}
+        for name in required
+    }
+
+
+def _missing_fields_from_error_payload(payload: Any) -> Set[str]:
+    missing: Set[str] = set()
+
+    def visit(value: Any) -> None:
+        if isinstance(value, dict):
+            error_type = str(value.get("type") or value.get("code") or "").lower()
+            message = str(value.get("msg") or value.get("message") or "").lower()
+            if "missing" in error_type or "field required" in message or "required" in message:
+                loc = value.get("loc") or value.get("path")
+                if isinstance(loc, list) and loc:
+                    missing.add(str(loc[-1]))
+                elif isinstance(loc, str):
+                    missing.add(loc.split(".")[-1])
+                field = value.get("field") or value.get("name")
+                if field:
+                    missing.add(str(field))
+            for item in value.values():
+                visit(item)
+        elif isinstance(value, list):
+            for item in value:
+                visit(item)
+
+    visit(payload)
+    return {field for field in missing if field and field not in {"body", "params"}}
+
+
+def _format_required_field_details(
+    field_names: Set[str],
+    schema_fields: Dict[str, Dict[str, Any]],
+) -> str:
+    if not field_names:
+        return ""
+
+    lines = []
+    for field_name in sorted(field_names):
+        schema = schema_fields.get(field_name, {})
+        field_type = schema.get("type")
+        description = schema.get("description") or schema.get("title")
+        detail = field_name
+        extras = []
+        if field_type:
+            extras.append(str(field_type))
+        if description:
+            extras.append(str(description))
+        if extras:
+            detail += " (" + "; ".join(extras) + ")"
+        lines.append(f"- {detail}")
+    return "\n".join(lines)
+
+
+def _summarize_tenant_mcp_payload(payload: Any, raw_content: str) -> str:
+    if payload is None:
         return "La herramienta tenant_mcp devolvió un resultado en texto."
 
     if not isinstance(payload, dict):
         return "La herramienta tenant_mcp devolvió un resultado estructurado."
 
-    status = payload.get("status_code")
+    status = _payload_status_code(payload)
     items = payload.get("items")
     page = payload.get("page")
     parts = []
@@ -135,7 +300,48 @@ def _format_tenant_mcp_result(
     params_text = (
         _compact_json(params) if isinstance(params, dict) and params else "sin parámetros"
     )
-    summary = _summarize_tenant_mcp_payload(response_content)
+    payload = _parse_json_payload(response_content)
+    status_code = _payload_status_code(payload)
+    schema = _request_schema_from_tool_call(args, str(action))
+    schema_fields = _schema_required_fields(schema)
+
+    if _is_tenant_mcp_error(payload, response_content):
+        missing_fields = _missing_fields_from_error_payload(payload)
+        if status_code == 422 and not missing_fields:
+            missing_fields = set(schema_fields)
+        missing_detail = _format_required_field_details(missing_fields, schema_fields)
+        error_text = _payload_error_text(payload, response_content)
+        summary_bits = []
+        if status_code is not None:
+            summary_bits.append(f"status_code={status_code}")
+        if missing_fields:
+            summary_bits.append("faltan parámetros: " + ", ".join(sorted(missing_fields)))
+        summary = "; ".join(summary_bits) if summary_bits else "error reportado por la herramienta"
+        logger.info(
+            "Wrapped tenant_mcp error for history: function=%s action=%s summary=%s",
+            function_name,
+            action,
+            summary,
+        )
+        missing_section = (
+            f"\nParámetros requeridos faltantes o inválidos:\n{missing_detail}"
+            if missing_detail
+            else ""
+        )
+        return (
+            "Resultado Tenant MCP fallido.\n"
+            f"Función: {function_name}.\n"
+            f"Acción: {action}.\n"
+            f"Parámetros usados: {params_text}.\n"
+            f"Resumen: La llamada falló ({summary}).\n"
+            f"Detalle del error: {error_text}"
+            f"{missing_section}\n"
+            "Podrías intentar nuevamente corrigiendo los parámetros. "
+            "Evita repetir la misma llamada con los mismos parámetros fallidos.\n"
+            f"Datos devueltos:\n{response_content}"
+        )
+
+    summary = _summarize_tenant_mcp_payload(payload, response_content)
     logger.info(
         "Wrapped tenant_mcp result for history: function=%s action=%s summary=%s",
         function_name,
@@ -150,8 +356,8 @@ def _format_tenant_mcp_result(
         f"Parámetros usados: {params_text}.\n"
         f"Resumen: {summary}\n"
         "Usa este resultado para responder al usuario en español con "
-        "WhatsappAlUsuarioFn. No repitas la misma llamada tenant_mcp salvo "
-        "que necesites datos distintos.\n"
+        "WhatsappAlUsuarioFn. Evita repetir la misma llamada tenant_mcp con "
+        "los mismos parámetros si este resultado ya permite responder.\n"
         f"Datos devueltos:\n{response_content}"
     )
 
